@@ -1,0 +1,57 @@
+@startuml
+left to right direction
+
+!include common/domain/generation.puml
+!include common/domain/draining.puml
+!include common/domain/kind.puml
+
+title Структура поколений соединений
+
+interface "HandoverGenerationFunc[C any]" as intlDomain.HandoverGenerationFunc <<func>> {
+  +call(next: *C) : (domain.DrainingFunc, error)
+}
+
+interface "ShutdownGenerationFunc" as intlDomain.ShutdownGenerationFunc <<func>> {
+  +call() : (domain.DrainingFunc, error)
+}
+
+intlDomain.HandoverGenerationFunc --> domain.DrainingFunc : returns
+intlDomain.ShutdownGenerationFunc --> domain.DrainingFunc : returns
+
+class "[C any] Output" as generation.OutputT
+generation.OutputT ..|> intlDomain.Generation : implements
+
+class "NewOutputGeneration[C any](...)" as generation.NewOutputGeneration <<constructor>> {
+  +returns() : (intlDomain.Generation[C], intlDomain.ShutdownGenerationFunc)
+}
+generation.NewOutputGeneration --> generation.OutputT : returns generation
+generation.NewOutputGeneration --> intlDomain.ShutdownGenerationFunc : returns close func
+
+class "[C any] Input" as generation.InputT
+generation.InputT ..|> intlDomain.Generation : implements
+
+class "NewInputGeneration[C any](...)" as generation.NewInputGeneration <<constructor>> {
+  +returns() : (intlDomain.Generation[C], intlDomain.HandoverGenerationFunc[C])
+}
+generation.NewInputGeneration --> generation.InputT : returns generation
+generation.NewInputGeneration --> intlDomain.HandoverGenerationFunc : returns close func
+
+class "[C any] Snapshot" as generation.SnapshotT
+generation.SnapshotT ..|> intlDomain.Generation : implements
+
+class "NewSnapshotGeneration[C any](...)" as generation.NewSnapshotGeneration <<constructor>> {
+  +returns() : (intlDomain.Generation[C], intlDomain.ShutdownGenerationFunc)
+}
+generation.NewSnapshotGeneration --> generation.SnapshotT : returns generation
+generation.NewSnapshotGeneration --> intlDomain.ShutdownGenerationFunc : returns close func
+
+legend bottom
+  | GenerationAny | Нетипизированный интерфейс поколения — версия, счётчик удержаний, readiness, ожидание закрытия |
+  | [C any] Generation | Типизированный интерфейс поколения — расширяет GenerationAny, добавляет Conn() |
+  | [C any] Output | Поколение соединения для исходящих запросов. Завершается через ShutdownGenerationFunc |
+  | [C any] Input | Поколение соединения для входящих запросов. Завершается через HandoverGenerationFunc |
+  | [C any] Snapshot | Поколение-снимок для консистентного набора соединений. Завершается через ShutdownGenerationFunc |
+  | ShutdownGenerationFunc | Одноразовая функция вывода output/snapshot-поколения из активной эксплуатации |
+  | HandoverGenerationFunc[C] | Одноразовая функция вывода input-поколения с передачей ресурсов следующему |
+endlegend
+@enduml

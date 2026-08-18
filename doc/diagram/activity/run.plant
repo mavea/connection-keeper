@@ -1,0 +1,66 @@
+@startuml
+|Общее приложение|
+start
+fork
+  :Основная бизнес логика;
+fork again
+  :запускаем отдельный поток
+  отслеживания работы коннекторов;
+|\manager::Manager|
+:Run
+----
+    ctx context.Context,
+    conf domain.RunConfig
+----
+    error;
+
+while (таймер активен и контексты не отменены?)
+  :ожидание timer.C или отмены ctx;
+  if (interval <= 0?) then (yes)
+    :return ErrCheckIntervalIsNotValid;
+    break
+  endif
+
+  :updateCheck = true;
+  while (updateCheck?)
+    |\internal\connector::Connector|
+    :**ReconnectIfNeeded**
+    ----
+        ctx context.Context,
+        force bool = false,
+    ----
+        updated bool,
+        err error;
+
+    |\manager::Manager|
+    if (error?) then (not nil)
+      :DisableReadiness();
+      :shutdownConnectors + DrainAll;
+      :return error;
+      break
+    endif
+    :updateCheck = updatesCheck;
+  endwhile
+
+  if (ctx cancelled?) then (yes)
+    :return ErrCtxCancel;
+    break
+  endif
+  :EnableReadiness();
+
+  |\internal\lifecycle::DrainManager|
+  :**DrainNext**;
+  |\manager::Manager|
+  if (drain error?) then (yes)
+    :logger.WarnContext(...);
+  endif
+  :timer.Reset(interval);
+endwhile
+
+
+:Ошибка в менеджере, или обрыв контекста;
+
+|Общее приложение|
+end fork
+end
+@enduml

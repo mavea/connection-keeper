@@ -1,0 +1,67 @@
+@startuml
+left to right direction
+
+!include common/domain/generation.puml
+!include common/domain/draining.puml
+!include common/domain/kind.puml
+
+title Структура lifecycle-менеджеров
+
+interface "KindManager" as intlDomain.KindManager {
+  +GetOrCreate(s: string) : (domain.Kind, bool, error)
+  +RegisterName(s: string) : error
+  +Delete(kind: domain.Kind)
+  +Next() : uint32
+}
+
+interface "RegistryManager" as intlDomain.RegistryManager {
+  +RegisterGeneration(kind: domain.Kind)
+  +SetGeneration(kind: domain.Kind, gen: GenerationAny, close: any)
+  +GetGeneration(kind: domain.Kind) : GenerationAny
+  +GetGenerationAndCancelFunc(kind: domain.Kind) : (GenerationAny, any)
+}
+
+interface "ConnectorManager" as intlDomain.ConnectorManager {
+  +RegisterConnector(kind: domain.Kind, c: Connector) : error
+  +GetConnector(kind: domain.Kind) : (Connector, error)
+  +List() : []Connector
+}
+
+interface "DrainManager" as intlDomain.DrainManager {
+  +Register(gen: GenerationAny, close: domain.DrainingFunc)
+  +DrainNext() : error
+  +DrainAll() : error
+}
+
+interface "Manager" as intlDomain.Manager {
+  +KindManager() : KindManager
+  +ConnectorManager() : ConnectorManager
+  +RegistryManager() : RegistryManager
+  +DrainManager() : DrainManager
+  +Readiness() : bool
+  +EnableReadiness() : bool
+  +DisableReadiness() : bool
+  +Run(ctx: context.Context, conf: RunConfig) : error
+  +Shutdown() : error
+}
+
+intlDomain.Manager --> intlDomain.KindManager : uses
+intlDomain.Manager --> intlDomain.ConnectorManager : uses
+intlDomain.Manager --> intlDomain.RegistryManager : uses
+intlDomain.Manager --> intlDomain.DrainManager : uses
+
+intlDomain.RegistryManager --> intlDomain.GenerationAny : stores
+intlDomain.ConnectorManager --> intlDomain.Connector : stores
+intlDomain.DrainManager --> intlDomain.GenerationAny : waits for close
+intlDomain.DrainManager --> domain.DrainingFunc : calls on close
+intlDomain.KindManager --> domain.Kind : manages
+
+legend bottom
+  | Элемент | Пакет | Описание |
+  | KindManager | internal/domain | Реестр уникальных идентификаторов типов коннекторов |
+  | RegistryManager | internal/domain | Хранилище актуальных поколений по kind; атомарный доступ без блокировок |
+  | ConnectorManager | internal/domain | Хранилище коннекторов по kind; обеспечивает вызов ReconnectIfNeeded в цикле Run |
+  | DrainManager | internal/domain | Очередь вывода устаревших поколений из эксплуатации с retry и таймаутом |
+  | Manager | internal/domain | Центральная точка управления; координирует все lifecycle-менеджеры |
+endlegend
+@enduml

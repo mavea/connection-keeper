@@ -1,0 +1,98 @@
+@startuml
+|#OldLace|Функция создания|
+start
+
+:**NewInput | NewOutput [C any]**
+----
+	ctx context.Context,
+ 	name string,
+ 	mgr domain.Manager,
+	conf domain.ConnectorConfig,
+	needsUpdate domain.ConnectionInvalidationFunc,
+	create domain.CreateInputConnectionFunc[C] |
+	      domain.CreateOutputConnectionFunc[C],;
+:Создаём kind;
+
+|#AntiqueWhite|\internal\kind::KindManager|
+ :**NewKind [C any]**
+----
+    s string,
+    m KindManager
+----
+    kind domain.KindType[C],
+    err error,;
+note right
+    Kind уникален по имени.
+    Если имя уже занято,
+    регистрация завершится ошибкой.
+end note
+
+|Функция создания|
+if (error?) then (not nil)
+stop
+end if
+
+:Создаём место под активное поколение;
+|#PeachPuff|\internal\lifecycle::RegistryManager|
+:**RegisterGeneration**
+----
+    kind domain.Kind;
+
+|Функция создания|
+:Создаём коннектор;
+|#AntiqueWhite|\internal\connector|
+:**func NewInput | NewOutput [C any]**
+----
+ 	kind domain.Kind,
+		conf domain.ConnectorConfig,
+    needsUpdateFunc domain.ConnectionInvalidationFunc,
+		constructorFunc domain.CreateInputConnectionFunc[C] |
+		                domain.CreateOutputConnectionFunc[C],
+		mgr domain.Manager,
+----
+ 	domain.Connector;
+
+|Функция создания|
+:Регистрируем коннектор;
+|#PeachPuff|\internal\lifecycle::ConnectorManager|
+:**RegisterConnector**
+----
+    kind domain.Kind,
+    c domain.Connector,
+----
+    error;
+
+|Функция создания|
+if (error?) then (not nil)
+  |#AntiqueWhite|\internal\kind::KindManager|
+  :Delete(kind);
+  |Функция создания|
+  stop
+end if
+
+:Первичная инициализация поколения;
+|#AntiqueWhite|\internal\connector::Connector|
+:**ReconnectIfNeeded**
+----
+    ctx context.Context,
+    force bool = true,
+----
+    updated bool,
+    err error;
+
+|Функция создания|
+if (error?) then (not nil)
+  |#AntiqueWhite|\internal\kind::KindManager|
+  :Delete(kind);
+  |Функция создания|
+  note right
+      rollback удаляет только kind.
+      registry-slot может остаться
+      (допустимый orphan в текущем дизайне).
+  end note
+stop
+end if
+
+:return kind, nil;
+end
+@enduml

@@ -1,0 +1,5 @@
+interface domain.Kind {
+  .. Методы ..
+  + ID() : int
+  + String() : string
+}

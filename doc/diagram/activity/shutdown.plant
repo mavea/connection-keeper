@@ -1,0 +1,42 @@
+@startuml
+|Общее приложение|
+start
+:Shutdown();
+
+|\manager::Manager|
+if (conf == nil?) then (yes)
+  :return nil;
+  stop
+endif
+
+:DisableReadiness();
+:wait DisableReadinessTimeout();
+if (mgr.run.Done()?) then (yes)
+  :return ErrCtxCancel + ctx.Err();
+  stop
+endif
+
+:stop() -> runCancel();
+:wait done with StopTimeout();
+if (timeout?) then (yes)
+  :return ErrManagerIsNotStopped;
+  stop
+endif
+
+|\internal\connector::ConnectorManager|
+:List connectors;
+while (есть connector?)
+  |\internal\connector::Connector|
+  :connector.Close();
+  |\internal\connector::ConnectorManager|
+endwhile
+
+|\internal\lifecycle::DrainManager|
+:DrainAll();
+
+|\manager::Manager|
+:join errors from Close + DrainAll;
+:return error | nil;
+stop
+@enduml
+

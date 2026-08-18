@@ -1,0 +1,144 @@
+@startuml
+left to right direction
+
+!include common/domain/generation.puml
+!include common/domain/draining.puml
+!include common/domain/kind.puml
+
+title Структура Connector
+
+interface "Connector" as intlDomain.Connector {
+  +ReconnectIfNeeded(ctx: context.Context, force: bool) : (bool, error)
+  +Version() : uint
+  +Kind() : domain.Kind
+  +Close() : error
+}
+
+intlDomain.Connector --> intlDomain.GenerationAny : manages
+
+class "NewInput[C any](...)" as connector.NewInput <<function>> {
+  .. Параметры ..
+  +ctx : context.Context
+  +name : string
+  +mgr : intlDomain.Manager
+  +conf : intlDomain.ConnectorConfig
+  +needsUpdate : domain.ConnectionInvalidationFunc
+  +constructorFunc : domain.CreateInputConnectionFunc[C]
+  .. Возврат ..
+  +returns() : (domain.KindType[C], error)
+}
+connector.NewInput ..> intlDomain.Connector : creates input connector
+
+class "NewOutput[C any](...)" as connector.NewOutput <<function>> {
+  .. Параметры ..
+  +ctx : context.Context
+  +name : string
+  +mgr : intlDomain.Manager
+  +conf : intlDomain.ConnectorConfig
+  +needsUpdate : domain.ConnectionInvalidationFunc
+  +constructorFunc : domain.CreateOutputConnectionFunc[C]
+  .. Возврат ..
+  +returns() : (domain.KindType[C], error)
+}
+connector.NewOutput ..> intlDomain.Connector : creates output connector
+
+class "NewSnapshot[C any](...)" as snapshot.NewSnapshot <<function>> {
+  .. Параметры ..
+  +name : string
+  +mgr : intlDomain.Manager
+  +constructorFunc : domain.CreateSnapshotFunc[C]
+  .. Возврат ..
+  +returns() : (domain.Kind, error)
+}
+snapshot.NewSnapshot ..> intlDomain.Connector : creates snapshot connector
+
+connector.NewInput --> domain.Kind : returns kind
+connector.NewOutput --> domain.Kind : returns kind
+snapshot.NewSnapshot --> domain.Kind : returns kind
+
+' ─── Группы ───────────────────────────────────────────────────────────────
+
+class "group" as group.group {
+  -kind : domain.Kind
+  -version : uint
+  +Kind() : domain.Kind
+  +Version() : uint
+  +Close() : error
+}
+
+class "listG" as group.listG {
+  -list : []Connector
+}
+group.listG --|> group.group : extends
+group.listG ..|> intlDomain.Connector : implements
+group.listG "1" o-- "1..*" intlDomain.Connector : aggregates
+
+class "NewList(...)" as group.NewList <<function>> {
+  .. Параметры ..
+  +name : string
+  +mgr : intlDomain.Manager
+  +list : ...domain.Kind
+  .. Возврат ..
+  +returns() : (domain.KindGroup, error)
+}
+group.NewList ..> group.listG : creates
+group.NewList --> domain.KindGroup : returns kind
+
+class "neighbors" as group.neighbors {
+  -list : []Connector
+  -listVersions : []uint
+}
+group.neighbors --|> group.group : extends
+group.neighbors ..|> intlDomain.Connector : implements
+group.neighbors "1" o-- "1..*" intlDomain.Connector : aggregates
+
+class "NewNeighbors(...)" as group.NewNeighbors <<function>> {
+  .. Параметры ..
+  +name : string
+  +mgr : intlDomain.Manager
+  +list : ...domain.Kind
+  .. Возврат ..
+  +returns() : (domain.KindGroup, error)
+}
+group.NewNeighbors ..> group.neighbors : creates
+group.NewNeighbors --> domain.KindGroup : returns kind
+
+class "dependency" as group.dependency {
+  -sourceConnector : Connector
+  -dependentConnector : Connector
+  -sourceVersion : uint
+  -dependentVersion : uint
+}
+group.dependency --|> group.group : extends
+group.dependency ..|> intlDomain.Connector : implements
+group.dependency --> intlDomain.Connector : sourceConnector
+group.dependency --> intlDomain.Connector : dependentConnector
+
+class "NewDependency(...)" as group.NewDependency <<function>> {
+  .. Параметры ..
+  +name : string
+  +mgr : intlDomain.Manager
+  +sourceConnector : domain.Kind
+  +dependentConnector : domain.Kind
+  .. Возврат ..
+  +returns() : (domain.KindGroup, error)
+}
+group.NewDependency ..> group.dependency : creates
+group.NewDependency --> domain.KindGroup : returns kind
+
+legend bottom
+  Публичные функции
+  | Элемент | Пакет | Описание |
+  | NewInput[C] | connector | Регистрирует input-коннектор и создаёт первичное поколение (force=true) |
+  | NewOutput[C] | connector | Регистрирует output-коннектор и создаёт первичное поколение (force=true) |
+  | NewSnapshot[C] | snapshot | Регистрирует snapshot-коннектор (первичное поколение создаётся при первом reconnect) |
+  | NewList | group | Группа-список: reconnect всех коннекторов при force; обновление при изменении суммарной версии |
+  | NewNeighbors | group | Группа-соседи: если один коннектор обновился — принудительно пересоздаёт остальных |
+  | NewDependency | group | Зависимость: при обновлении source принудительно пересоздаёт dependent |
+
+  Внутренние элементы
+  | Элемент | Пакет | Описание |
+  | Connector | internal/domain | Управляет lifecycle одного поколения соединения: reconnect, readiness, close |
+  | group | group | Базовая структура группы: Kind, Version, Close. ReconnectIfNeeded реализуется конкретными типами |
+endlegend
+@enduml

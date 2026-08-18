@@ -1,0 +1,38 @@
+@startuml
+|#PeachPuff|\internal\lifecycle::DrainManager|
+start
+
+:DrainNext();
+:nextGen();
+if (pending пуст?) then (yes)
+  stop
+endif
+
+:timer := CancelWaitTimeOut();
+if (WaitForClose сработал?) then (yes)
+  :callDrain(close);
+  if (error?) then (not nil)
+    :return error;
+    stop
+  endif
+  :removeCurrent();
+  stop
+else (timeout)
+  :try++;
+  if (try >= MaxRetryWaitAttempts?) then (yes)
+    :removeCurrent();
+    :callDrain(close);
+    stop
+  else (no)
+    note right
+      Поколение остаётся в очереди.
+      Следующий вызов DrainNext
+      пойдёт к следующему элементу
+      (циклический обход).
+    end note
+    stop
+  endif
+endif
+
+@enduml
+

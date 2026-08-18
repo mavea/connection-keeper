@@ -1,0 +1,6 @@
+interface "DrainingFunc" as domain.DrainingFunc <<func>> {
+  +call() : error
+}
+interface "CancelFunc" as domain.CancelFunc <<func>> {
+  +call() : error
+}

@@ -1,0 +1,20 @@
+
+
+interface "GenerationAny" as intlDomain.GenerationAny {
+  .. Доступ к соединению ..
+  +Any() : (any, domain.CancelFunc)
+
+  .. Метаданные ..
+  +Version() : uint
+
+  .. Проверка и lifecycle ..
+  +Readiness(ctx context.Context) : error
+  +Refs() : int64
+  +WaitForClose() : <-chan struct{}
+}
+
+interface "[C any] Generation" as intlDomain.Generation {
+  .. Типизированный доступ ..
+  +Conn() : (*C, domain.CancelFunc)
+}
+intlDomain.Generation --|> intlDomain.GenerationAny : extends
