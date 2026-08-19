@@ -41,6 +41,7 @@ func NewOutputGeneration[C any](
 		readiness:    readiness,
 		waitForClose: make(chan struct{}),
 	}
+	g.openChannelFlag.Store(true)
 	g.retainCount.Add(1)
 
 	closeFlag := atomic.Bool{}
@@ -50,9 +51,7 @@ func NewOutputGeneration[C any](
 		}
 		// Снимаем базовое удержание поколения в момент вывода его из активной эксплуатации.
 		// Это ожидаемое одноразовое действие и не рассматривается как сценарий для повторного запуска.
-		if g.retainCount.Add(-1) == 0 {
-			close(g.waitForClose)
-		}
+		g.releaseRef()
 
 		if shutdownFunc == nil {
 			return func() error {

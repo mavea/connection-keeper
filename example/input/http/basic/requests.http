@@ -1,0 +1,8 @@
+### Simple ping request
+GET http://localhost:8080/api/print
+
+### Trigger reconnection (config change)
+GET http://localhost:8080/api/change
+
+### Triggel close server
+GET http://localhost:8080/api/end

@@ -66,7 +66,6 @@ func (s *inputScenario) constructor(_ context.Context) (*mockInputConn, domain.R
 		nil
 }
 
-
 func newInputIntegrationHarness(
 	t *testing.T,
 	rec *lifecycleRecorder,
