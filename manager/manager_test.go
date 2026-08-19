@@ -56,7 +56,12 @@ func (m testDrainManager) DrainAll() error                                      
 func TestManagerStopReturnsNilWhenNotRunning(t *testing.T) {
 	t.Parallel()
 
-	mgr := &manager{conf: testRunConfig{disableReadiness: 10 * time.Millisecond}}
+	done := make(chan struct{})
+	close(done)
+	mgr := &manager{
+		conf: testRunConfig{stopTimeout: 10 * time.Millisecond},
+		run:  &managerRun{done: done},
+	}
 	if err := mgr.stop(); err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
@@ -66,10 +71,9 @@ func TestManagerStopReturnsTimeoutWhenDoneNotClosed(t *testing.T) {
 	t.Parallel()
 
 	mgr := &manager{
-		conf: testRunConfig{disableReadiness: 10 * time.Millisecond},
-		done: make(chan struct{}),
+		conf: testRunConfig{stopTimeout: 10 * time.Millisecond},
+		run:  &managerRun{done: make(chan struct{})},
 	}
-	mgr.runCancel = func() {}
 
 	err := mgr.stop()
 	if !errors.Is(err, ErrManagerIsNotStopped) {
@@ -81,11 +85,11 @@ func TestManagerStopReturnsNilWhenDoneIsClosed(t *testing.T) {
 	t.Parallel()
 
 	done := make(chan struct{})
+	close(done)
 	mgr := &manager{
-		conf: testRunConfig{disableReadiness: 20 * time.Millisecond, stopTimeout: 200 * time.Millisecond},
-		done: done,
+		conf: testRunConfig{stopTimeout: 200 * time.Millisecond},
+		run:  &managerRun{done: done},
 	}
-	mgr.runCancel = func() { close(done) }
 
 	if err := mgr.stop(); err != nil {
 		t.Fatalf("expected nil error, got %v", err)
@@ -97,8 +101,10 @@ func TestManagerShutdownDisableReadinessReturnsCtxCancel(t *testing.T) {
 
 	runCtx, cancel := context.WithCancel(context.Background())
 	cancel()
+	run := newManagerRun()
+	run.ctx = runCtx
 	mgr := &manager{
-		run:  runCtx,
+		run:  run,
 		conf: testRunConfig{disableReadiness: 20 * time.Millisecond},
 	}
 
@@ -112,8 +118,10 @@ func TestManagerShutdownDisableReadinessReturnsNilOnTimeout(t *testing.T) {
 	t.Parallel()
 
 	runCtx := context.Background()
+	run := newManagerRun()
+	run.ctx = runCtx
 	mgr := &manager{
-		run:  runCtx,
+		run:  run,
 		conf: testRunConfig{disableReadiness: 10 * time.Millisecond},
 	}
 	mgr.EnableReadiness()

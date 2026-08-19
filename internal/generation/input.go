@@ -4,6 +4,7 @@ import (
 	"connection-keeper/domain"
 	intlDomain "connection-keeper/internal/domain"
 	"context"
+	"log"
 	"sync/atomic"
 )
 
@@ -41,6 +42,7 @@ func NewInputGeneration[C any](
 		readiness:    readiness,
 		waitForClose: make(chan struct{}),
 	}
+	g.openChannelFlag.Store(true)
 	g.retainCount.Add(1)
 
 	closeFlag := atomic.Bool{}
@@ -50,9 +52,8 @@ func NewInputGeneration[C any](
 		}
 		// Снимаем базовое удержание поколения в момент вывода его из активной эксплуатации.
 		// Это ожидаемое одноразовое действие и не рассматривается как сценарий для повторного запуска.
-		if g.retainCount.Add(-1) == 0 {
-			close(g.waitForClose)
-		}
+		log.Printf("[generation#%d] вывод из активной эксплуатации\n", g.version)
+		g.releaseRef()
 
 		if handoverFunc == nil {
 			return func() error {

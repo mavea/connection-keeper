@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -18,9 +19,63 @@ var (
 	ErrCtxCancel               = errors.New("context canceled")
 	ErrCheckIntervalIsNotValid = errors.New("connection check interval must be > 0")
 	ErrManagerAlreadyRunning   = errors.New("manager already running")
+	ErrManagerAlreadyStopped   = errors.New("manager already stopped")
 	ErrManagerIsNotStopped     = errors.New("manager is not stopped")
 	ErrLoggerIsNil             = errors.New("logger is nil")
 )
+
+type managerRun struct {
+	run    atomic.Bool
+	ctx    context.Context
+	cancel context.CancelFunc
+	done   chan struct{}
+	mu     sync.Mutex
+}
+
+func newManagerRun() *managerRun {
+	return &managerRun{
+		run: atomic.Bool{},
+		mu:  sync.Mutex{},
+	}
+}
+
+func (mgrR *managerRun) isRunning() bool {
+	return mgrR.run.Load()
+}
+func (mgrR *managerRun) Run(ctx context.Context, cancelFunc context.CancelFunc) error {
+	mgrR.mu.Lock()
+	defer mgrR.mu.Unlock()
+	if mgrR.isRunning() {
+		return ErrManagerAlreadyRunning
+	}
+	mgrR.ctx = ctx
+	mgrR.cancel = cancelFunc
+	mgrR.done = make(chan struct{})
+	if !mgrR.run.CompareAndSwap(false, true) {
+		return ErrManagerAlreadyRunning
+	}
+
+	return nil
+}
+func (mgrR *managerRun) Done() <-chan struct{} {
+	return mgrR.done
+}
+func (mgrR *managerRun) Ctx() context.Context {
+	return mgrR.ctx
+}
+
+func (mgrR *managerRun) Stop() error {
+	mgrR.mu.Lock()
+	defer mgrR.mu.Unlock()
+	if !mgrR.run.CompareAndSwap(true, false) {
+		return ErrManagerAlreadyStopped
+	}
+	if mgrR.cancel != nil {
+		mgrR.cancel()
+	}
+	mgrR.cancel = nil
+	return nil
+}
 
 type manager struct {
 	ctx          context.Context
@@ -33,10 +88,7 @@ type manager struct {
 	conf      intlDomain.RunConfig
 	logger    domain.Logger
 
-	run       context.Context
-	runCancel context.CancelFunc
-	done      chan struct{}
-	singleRun atomic.Bool
+	run *managerRun
 }
 
 type ManagerConfig interface {
@@ -75,23 +127,21 @@ func newMgr(
 
 		readiness: atomic.Bool{},
 
-		logger:    logger,
-		singleRun: atomic.Bool{},
+		logger: logger,
+		run:    newManagerRun(),
 	}
 
 	return mgr
 }
 
 func (mgr *manager) stop() error {
-	if mgr.runCancel != nil {
-		c := mgr.runCancel
-		mgr.runCancel = nil
-		c()
+
+	if mgr.run.Stop() != nil {
 		timerStop := time.NewTimer(mgr.conf.StopTimeout())
 		defer timerStop.Stop()
 
 		select {
-		case <-mgr.done:
+		case <-mgr.run.Done():
 		case <-timerStop.C:
 			return ErrManagerIsNotStopped
 		}
@@ -106,8 +156,8 @@ func (mgr *manager) shutdownDisableReadiness() error {
 	defer timer.Stop()
 
 	select {
-	case <-mgr.run.Done():
-		return errors.Join(ErrCtxCancel, mgr.run.Err())
+	case <-mgr.run.Ctx().Done():
+		return errors.Join(ErrCtxCancel, mgr.run.Ctx().Err())
 	case <-timer.C:
 	}
 	return nil
@@ -199,13 +249,6 @@ func (mgr *manager) EnableReadiness() (oldValue bool) {
 }
 
 func (mgr *manager) Run(ctx context.Context, conf intlDomain.RunConfig) error {
-	if !mgr.singleRun.CompareAndSwap(false, true) {
-		return ErrManagerAlreadyRunning
-	}
-	defer func() {
-		mgr.singleRun.Store(false)
-	}()
-
 	var (
 		err          error
 		connectorMgr = mgr.connectorMgr
@@ -215,26 +258,20 @@ func (mgr *manager) Run(ctx context.Context, conf intlDomain.RunConfig) error {
 		timer       = time.NewTimer(interval)
 		updateCheck bool
 	)
-
-	if mgr.runCancel != nil {
-		return ErrManagerAlreadyRunning
+	if err = mgr.run.Run(context.WithCancel(ctx)); err != nil {
+		return err
 	}
-	mgr.run, mgr.runCancel = context.WithCancel(ctx)
 	mgr.conf = conf
-	mgr.done = make(chan struct{})
 	defer func() {
-		if mgr.runCancel != nil {
-			mgr.runCancel = nil
-		}
 		mgr.conf = nil
 		var ok bool
 		select {
-		case _, ok = <-mgr.done:
+		case _, ok = <-mgr.run.done:
 			if !ok {
-				close(mgr.done)
+				close(mgr.run.done)
 			}
 		default:
-			close(mgr.done)
+			close(mgr.run.done)
 		}
 
 		timer.Stop()
@@ -244,7 +281,7 @@ func (mgr *manager) Run(ctx context.Context, conf intlDomain.RunConfig) error {
 		select {
 		case <-ctx.Done():
 			return ErrCtxCancel
-		case <-mgr.run.Done():
+		case <-mgr.run.Ctx().Done():
 			return nil
 		case <-timer.C:
 			newInterval = conf.ConnectionCheckInterval()
@@ -271,7 +308,7 @@ func (mgr *manager) Run(ctx context.Context, conf intlDomain.RunConfig) error {
 		select {
 		case <-ctx.Done():
 			return ErrCtxCancel
-		case <-mgr.run.Done():
+		case <-mgr.run.Ctx().Done():
 			return nil
 		default:
 			mgr.EnableReadiness()

@@ -4,6 +4,7 @@ import (
 	"connection-keeper/domain"
 	"context"
 	"errors"
+	"log"
 	"sync/atomic"
 )
 
@@ -38,7 +39,8 @@ type generation[C any] struct {
 	retainCount atomic.Int64
 
 	// waitForClose закрывается в момент, когда снято последнее удержание поколения.
-	waitForClose chan struct{}
+	waitForClose    chan struct{}
+	openChannelFlag atomic.Bool
 
 	con       *C
 	readiness domain.ReadinessFunc
@@ -62,8 +64,12 @@ func (g *generation[C]) Version() uint {
 // Параметры: отсутствуют.
 // Возвращаемые значения: отсутствуют.
 func (g *generation[C]) releaseRef() {
-	if g.retainCount.Add(-1) == 0 {
-		close(g.waitForClose)
+	r := g.retainCount.Add(-1)
+	log.Printf("[generation#%d] снято удержание, осталось %d\n", g.version, r)
+	if r == 0 {
+		if g.openChannelFlag.CompareAndSwap(true, false) {
+			close(g.waitForClose)
+		}
 	}
 }
 
@@ -77,17 +83,23 @@ func (g *generation[C]) releaseRef() {
 //   - *C: объект соединения поколения.
 //   - domain.CancelFunc: функция снятия удержания, полученного этим вызовом Conn.
 func (g *generation[C]) Conn() (*C, domain.CancelFunc) {
-	g.retainCount.Add(1)
-
 	drained := atomic.Bool{}
-	return g.con, func() error {
+	f := func() error {
 		if !drained.CompareAndSwap(false, true) {
 			return ErrGenerationAlreadyRelease
 		}
+		log.Printf("[generation#%d] снимаем удержание Conn, осталось %d\n", g.version, g.retainCount.Load())
 		g.releaseRef()
 
 		return nil
 	}
+
+	if !g.openChannelFlag.Load() {
+		return nil, nil
+	}
+	g.retainCount.Add(1)
+
+	return g.con, f
 }
 
 // Any возвращает объект connection поколения в виде any и функцию снятия удержания этого использования.
